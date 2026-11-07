@@ -5,7 +5,7 @@ import {
   PrerequisiteRuleRecord,
   ProgramEntry,
   WebsiteConflictRecord,
-} from '../types/advisor';
+} from '../../../src/types/advisor';
 
 export const EXPECTED_DATASET_DIAGNOSTICS = {
   program_course_records: 1617,

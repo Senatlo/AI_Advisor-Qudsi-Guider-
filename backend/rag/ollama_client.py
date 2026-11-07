@@ -168,11 +168,15 @@ class LocalOllamaClient:
                 "model": self.chat_model,
                 "messages": messages,
                 "stream": False,
+                "think": False,
                 "options": {"temperature": temperature, "num_ctx": 4096},
             },
         )
         msg = resp.get("message", {})
+        content = msg.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise OllamaServiceError("Local model returned an empty answer. No academic answer was generated.")
         return {
             "model_used": resp.get("model", self.chat_model),
-            "content": str(msg.get("content", "")).strip(),
+            "content": content.strip(),
         }

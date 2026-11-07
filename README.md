@@ -6,7 +6,9 @@
 
 ## 1. Mission & Non-Negotiable Architecture
 
-**Al-Quds AI Academic Advisor** is a locally deployable full-stack RAG and deterministic study-planning MVP scoped exclusively to **Al-Quds University** across **25 represented program and department entries**.
+**Al-Quds AI Academic Advisor** is a locally deployable catalog and RAG chat application scoped exclusively to **Al-Quds University** across **25 represented program and department entries**.
+
+The active UI contains overview, chat, course explorer, and live sources/data status. Incomplete study planning and disconnected portal features have been removed, along with their public API routes. Demo data is retained only in test fixtures. See [FEATURE_CLEANUP.md](FEATURE_CLEANUP.md) for the removal inventory and current verification.
 
 - **100% Local Model Inference (Zero Cloud LLM Runtime)**:
   - Chat inference runs locally via Ollama (`POST /api/chat`) using a configurable Qwen model (`OLLAMA_CHAT_MODEL`, documented optional default `qwen2.5:3b` if installed; discovered dynamically via `ollama list` or `GET /api/tags` and never silently substituted).
@@ -14,10 +16,10 @@
   - **No Gemini, OpenAI, or remote cloud AI SDK** is ever called at application runtime.
 - **RAG Only — Zero Model Fine-Tuning**:
   - Ingests official Al-Quds catalog CSVs and verified university bylaws into a local **SQLite + FTS5** relational store and **ChromaDB** vector store without altering model weights.
-- **Strict Separation of Retrieval & Deterministic Math**:
-  - `backend/planner/engine.py` evaluates prerequisites, corequisites, boolean `AND`/`OR` rules, and non-double-counted completed credits deterministically. The LLM never makes authoritative numeric or eligibility decisions.
-- **Honest Cloud Preview vs. Local Runtime**:
-  - When viewed in Google AI Studio Build preview (where local Python FastAPI and local Ollama are inaccessible), the UI displays a conspicuous **`Local backend not connected`** status banner and clearly labels any static preview cards as **`Illustrative UI demo — not a live academic answer`**. Live AI answers and portal logins are never simulated.
+- **Advising scope**:
+  - Chat explains catalog facts and follows prerequisite course references to their names. It does not establish registration eligibility. Legacy planner code remains for regression/reference only.
+- **Explicit connection failures**:
+  - If the backend is inaccessible, the app displays an unavailable state. It does not substitute illustrative answers, programs, or course rows.
 
 ---
 
@@ -31,9 +33,9 @@ These metrics are enforced as import diagnostics in `backend/ingest/importer.py`
 | Program-course records (`courses_master_official_only.csv`) | `1,617` | Preserved at row level (`row_id`); never naively deduplicated by course number alone |
 | Distinct 7-digit course numbers | `1,099` | Stored and queried as `TEXT` strings preserving leading zeros (e.g., `0302101`) |
 | Represented program / department entries | `25` | Assigned transparent `evidence_level` (`verified_planning`, `partial_planning`, `catalog_only`) |
-| Prerequisite / corequisite rules (`prerequisite_rules.csv`) | `964` | `912` `parsed` (boolean AST), `40` `raw_only`, `12` `ambiguous` (`raw_only` & `ambiguous` route to `needs_verification`) |
+| Prerequisite / corequisite rules (`prerequisite_rules.csv`) | `964` | Source diagnostics describe `912` parsed, `40` raw, and `12` ambiguous rules. The current importer treats all `964` as raw; eligibility planning is removed. Chat uses original catalog prerequisite text and name lookup. |
 | Plan course requirements (`plan_course_requirements.csv`) | `1,617` | Labeled `recommended` — **never** treated as proof that every course is mandatory |
-| Website conflicts (`website_conflicts.csv`) | `53` | Surfaced in Course Explorer, Chat citations, and Planner (`needs_verification`) |
+| Website conflicts (`website_conflicts.csv`) | `53` | Current count appears in data status; chat warns when retrieved courses have recorded source conflicts. Verify details against university sources. |
 | Documented data gaps (`data_gaps.csv`) | `1,655` | Surfaced per course and program to transparently bound academic advice |
 
 ### Explicit Hard Exclusions
@@ -138,6 +140,7 @@ bash scripts/run_tests.sh
 ```bash
 python3 -m unittest discover -s tests/python -v
 npx tsx tests/frontend/test_planner_logic.ts
+npx tsx tests/frontend/test_live_data.ts
 npm run lint
 npm run build
 ```

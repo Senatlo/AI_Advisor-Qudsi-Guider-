@@ -6,15 +6,15 @@
  */
 
 import assert from 'node:assert/strict';
+import { evaluateDeterministicPlanOffline } from './offline_planner_fixture';
 import {
-  evaluateDeterministicPlanOffline,
   preserveSevenDigitCode,
 } from '../../src/services/apiClient';
 import {
   EXCLUDED_SYNTHETIC_ASSETS,
   EXPECTED_DATASET_DIAGNOSTICS,
   REPRESENTED_25_PROGRAMS,
-} from '../../src/data/verifiedReferenceData';
+} from './fixtures/catalog';
 
 function runFrontendTests(): void {
   // 1. Verify 25 represented programs and dataset diagnostic constants

@@ -30,22 +30,9 @@ try:
 
     class ChatRequestModel(BaseModel):
         query: str = Field(..., min_length=1, max_length=2000)
+        language: str = Field(default="en", pattern="^(ar|en)$")
         program_id: Optional[str] = Field(default=None, max_length=100)
         session_history: Optional[List[ChatTurnModel]] = Field(default=None)
-
-    class StudentCourseInputModel(BaseModel):
-        course_number: str = Field(..., min_length=1, max_length=20)
-        status: str = Field(
-            default="completed",
-            pattern="^(completed|in_progress|failed_not_passed|desired)$",
-        )
-        is_repeat: bool = False
-        is_transfer_or_substitution: bool = False
-
-    class PlannerEvaluateRequestModel(BaseModel):
-        program_id: str = Field(..., min_length=1, max_length=100)
-        student_courses: List[StudentCourseInputModel] = Field(default_factory=list)
-        target_courses: Optional[List[str]] = Field(default=None)
 
     app = FastAPI(
         title="Al-Quds AI Academic Advisor — Local Backend API",
@@ -113,28 +100,8 @@ try:
             query=req.query,
             program_id=req.program_id,
             session_history=history,
+            language=req.language,
         )
-
-    @app.post("/api/planner/evaluate")
-    async def api_planner_evaluate(req: PlannerEvaluateRequestModel) -> Dict[str, Any]:
-        courses_payload = [
-            {
-                "course_number": c.course_number,
-                "status": c.status,
-                "is_repeat": c.is_repeat,
-                "is_transfer_or_substitution": c.is_transfer_or_substitution,
-            }
-            for c in req.student_courses
-        ]
-        return service.planner.evaluate_plan(
-            program_id=req.program_id,
-            student_courses=courses_payload,
-            target_courses=req.target_courses,
-        )
-
-    @app.get("/api/portal/status")
-    async def api_portal_status() -> Dict[str, Any]:
-        return service.portals.get_overall_status()
 
     @app.get("/api/evidence")
     async def api_evidence(limit: int = Query(default=100, ge=1, le=500)) -> Dict[str, Any]:
@@ -185,8 +152,6 @@ class _StdlibAdvisorHandler(BaseHTTPRequestHandler):
             cnum = path.split("/api/courses/", 1)[1]
             res = service.get_course_detail(cnum)
             self._send_json(200 if res.get("found") else 404, res)
-        elif path == "/api/portal/status":
-            self._send_json(200, service.portals.get_overall_status())
         elif path == "/api/evidence":
             self._send_json(200, service.get_evidence())
         else:
@@ -205,6 +170,10 @@ class _StdlibAdvisorHandler(BaseHTTPRequestHandler):
 
         if path == "/api/chat":
             query = str(body.get("query", "")).strip()
+            language = body.get("language", "en")
+            if language not in {"ar", "en"}:
+                self._send_json(422, {"error": "Field 'language' must be ar or en."})
+                return
             if not query:
                 self._send_json(422, {"error": "Field 'query' is required."})
                 return
@@ -214,19 +183,7 @@ class _StdlibAdvisorHandler(BaseHTTPRequestHandler):
                     query=query,
                     program_id=body.get("program_id"),
                     session_history=body.get("session_history"),
-                ),
-            )
-        elif path == "/api/planner/evaluate":
-            pid = str(body.get("program_id", "")).strip()
-            if not pid:
-                self._send_json(422, {"error": "Field 'program_id' is required."})
-                return
-            self._send_json(
-                200,
-                service.planner.evaluate_plan(
-                    program_id=pid,
-                    student_courses=body.get("student_courses") or [],
-                    target_courses=body.get("target_courses"),
+                    language=language,
                 ),
             )
         else:

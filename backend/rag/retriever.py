@@ -548,14 +548,18 @@ class HybridRAGService:
         query: str,
         program_id: Optional[str] = None,
         session_history: Optional[List[Dict[str, str]]] = None,
+        language: str = "en",
     ) -> Dict[str, Any]:
         """Generate a grounded, citation-validated answer using local Ollama Qwen or return structured refusal."""
+        if language not in {"ar", "en"}:
+            raise ValueError("Response language must be ar or en.")
         retrieval = self.retrieve(query=query, program_id=program_id)
         if retrieval.get("refusal"):
             return {
                 "status": "refused",
+                "language": language,
                 "refusal_type": retrieval.get("refusal_type"),
-                "answer_ar": retrieval.get("refusal_message_ar"),
+                "answer_ar": retrieval.get("refusal_message_ar") or "لا تتوفر أدلة جامعية موثقة كافية للإجابة عن هذا السؤال. يلزم توفير المصدر الرسمي المناسب، ولا تكفي بيانات المساقات لإثبات الرسوم أو اللوائح.",
                 "answer_en": retrieval.get("refusal_message_en"),
                 "citations": [],
                 "conflicts": retrieval.get("conflicts", []),
@@ -603,7 +607,17 @@ class HybridRAGService:
         evidence_block_lines.append("</retrieved_evidence>")
         evidence_str = "\n".join(evidence_block_lines)
 
-        messages: List[Dict[str, str]] = [{"role": "system", "content": GROUNDED_SYSTEM_PROMPT}]
+        language_instruction = (
+            "The page language is Arabic (ar). Write the entire explanation in Arabic, "
+            "regardless of the question or conversation language. Use documented Arabic course names when available; "
+            "otherwise quote the documented original title without inventing an official Arabic name. "
+            "Keep citation IDs, course codes, and source URLs unchanged."
+            if language == "ar" else
+            "The page language is English (en). Write the entire explanation in English, "
+            "regardless of the question or conversation language. Use documented English course names when available. "
+            "Keep citation IDs, course codes, and source URLs unchanged."
+        )
+        messages: List[Dict[str, str]] = [{"role": "system", "content": GROUNDED_SYSTEM_PROMPT + "\n" + language_instruction}]
         if session_history:
             # Limit conversation context strictly to the current user/session (last 4 turns)
             for turn in session_history[-4:]:
@@ -617,7 +631,7 @@ class HybridRAGService:
                 "content": (
                     f"{evidence_str}\n\n"
                     f"Student Question: {query}\n"
-                    "Provide a concise, evidence-grounded response citing [ChunkID / CourseNumber / SourceURL]."
+                    f"Provide a concise response in {'Arabic' if language == 'ar' else 'English'}, citing [ChunkID / CourseNumber / SourceURL]."
                 ),
             }
         )
@@ -626,6 +640,7 @@ class HybridRAGService:
             llm_resp = self.ollama.generate_chat(messages=messages, temperature=0.0)
             return {
                 "status": "answered",
+                "language": language,
                 "refusal_type": None,
                 "answer": llm_resp["content"],
                 "citations": citations,
@@ -638,6 +653,9 @@ class HybridRAGService:
             # Never fabricate or simulate an AI answer when local Ollama is offline
             return {
                 "status": "ollama_unavailable",
+                "language": language,
+                "answer_ar": "تعذر الحصول على إجابة من نموذج Ollama المحلي. تحقق من تشغيله وتوفر النموذج ثم أعد المحاولة.",
+                "answer_en": "The local Ollama model could not generate an answer. Check that it is running and the model is available, then try again.",
                 "refusal_type": "ollama_unreachable_or_model_missing",
                 "error": str(exc),
                 "answer": None,

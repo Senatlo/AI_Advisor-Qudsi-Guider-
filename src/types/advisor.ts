@@ -4,9 +4,7 @@ export type NavigationTab =
   | 'home'
   | 'chat'
   | 'courses'
-  | 'planner'
-  | 'evidence'
-  | 'portals';
+  | 'evidence';
 
 export type EvidenceLevel = 'verified_planning' | 'partial_planning' | 'catalog_only';
 
@@ -146,6 +144,7 @@ export interface ChatCitation {
 }
 
 export interface ChatResponse {
+  language?: Language;
   status: 'answered' | 'refused' | 'ollama_unavailable' | 'backend_disconnected';
   refusal_type: string | null;
   answer?: string | null;

@@ -6,6 +6,7 @@ python3 -m unittest discover -s tests/python -v
 
 echo "=== 2. Running Frontend TypeScript Deterministic Planner Tests ==="
 npx tsx tests/frontend/test_planner_logic.ts
+npx tsx tests/frontend/test_live_data.ts
 
 echo "=== 3. Running TypeScript Typecheck (npm run lint) ==="
 npm run lint

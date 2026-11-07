@@ -28,7 +28,7 @@ from backend.ingest.arabic_utils import normalize_arabic_for_search, preserve_co
 from backend.ingest.schema import init_db
 from backend.planner.engine import DeterministicPlannerEngine
 from backend.portals.adapters import PortalSessionManager
-from backend.rag.benchmark import BENCHMARK_CASES, run_offline_retrieval_benchmark
+from backend.rag.benchmark import BENCHMARK_CASES
 from backend.rag.ollama_client import LocalOllamaClient
 from backend.rag.retriever import HybridRAGService
 
@@ -325,14 +325,12 @@ class AdvisorBackendService:
                     "SELECT * FROM sources ORDER BY source_id LIMIT ?", (limit,)
                 ).fetchall()
             ]
-            benchmark_report = run_offline_retrieval_benchmark(self.rag)
             return {
                 "website_conflicts": conflicts,
                 "data_gaps": gaps,
                 "sources": sources,
                 "excluded_synthetic_files": EXCLUDED_SYNTHETIC_FILES,
                 "excluded_non_policy_documents": EXCLUDED_NON_POLICY_DOCUMENTS,
-                "benchmark_report": benchmark_report,
             }
         finally:
             conn.close()

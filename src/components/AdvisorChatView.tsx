@@ -3,12 +3,10 @@ import {
   AlertCircle,
   AlertTriangle,
   ExternalLink,
-  Eye,
   Send,
   ShieldAlert,
   Trash2,
 } from 'lucide-react';
-import { ILLUSTRATIVE_SHOWCASE_EXAMPLES } from '../data/verifiedReferenceData';
 import { submitAdvisorChat } from '../services/apiClient';
 import {
   ChatResponse,
@@ -49,7 +47,6 @@ export const AdvisorChatView: React.FC<AdvisorChatViewProps> = ({
   const [selectedProgram, setSelectedProgram] = useState(initialProgramId || '');
   const [submitting, setSubmitting] = useState(false);
   const [history, setHistory] = useState<ConversationItem[]>([]);
-  const [showIllustrativeShowcase, setShowIllustrativeShowcase] = useState(!backendConnected);
 
   useEffect(() => {
     if (initialQuestion) {
@@ -71,8 +68,9 @@ export const AdvisorChatView: React.FC<AdvisorChatViewProps> = ({
     setSubmitting(true);
     try {
       const sessionHistory = history
-        .filter((h) => !h.response.is_illustrative_demo && h.response.status === 'answered')
-        .slice(-4)
+        .filter((h) => h.response.status === 'answered')
+        .slice(0, 4)
+        .reverse()
         .flatMap((h) => [
           { role: 'user' as const, content: h.query },
           {
@@ -83,6 +81,7 @@ export const AdvisorChatView: React.FC<AdvisorChatViewProps> = ({
 
       const resp = await submitAdvisorChat({
         query: trimmed,
+        language: lang,
         program_id: selectedProgram || undefined,
         session_history: sessionHistory,
       });
@@ -100,21 +99,6 @@ export const AdvisorChatView: React.FC<AdvisorChatViewProps> = ({
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const loadIllustrativeExample = (exampleId: string) => {
-    const ex = ILLUSTRATIVE_SHOWCASE_EXAMPLES.find((item) => item.id === exampleId);
-    if (!ex) return;
-    setHistory((prev) => [
-      {
-        id: `demo_${Date.now()}`,
-        query: isAr ? ex.query_ar : ex.query_en,
-        programId: 'COMP-BS',
-        response: ex.response,
-        timestamp: new Date().toLocaleTimeString(),
-      },
-      ...prev,
-    ]);
   };
 
   return (
@@ -209,7 +193,7 @@ export const AdvisorChatView: React.FC<AdvisorChatViewProps> = ({
                 />
                 <button
                   type="submit"
-                  disabled={submitting || !query.trim()}
+                  disabled={submitting || !query.trim() || !backendConnected || !health?.ollama?.chat_model_installed}
                   className="px-4 py-2 text-sm font-medium text-white bg-[#0F5257] hover:bg-[#0B3E42] disabled:opacity-50 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-2"
                 >
                   <Send className="w-4 h-4" />
@@ -229,60 +213,6 @@ export const AdvisorChatView: React.FC<AdvisorChatViewProps> = ({
         </form>
       </section>
 
-      {/* Honest UI Showcase Inspector when Local Backend is Disconnected */}
-      {!backendConnected && (
-        <section className="bg-amber-50/70 border border-amber-300 rounded-xl p-5 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-xs font-semibold text-amber-900">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>
-                {isAr
-                  ? 'الخادم المحلي غير متصل (Local backend not connected) — لا يتم أبداً تزييف إجابة ذكاء اصطناعي حية'
-                  : 'Local backend not connected — Live AI answers are never simulated or faked'}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowIllustrativeShowcase((v) => !v)}
-              className="text-xs font-medium text-[#0F5257] hover:underline flex items-center gap-1 whitespace-nowrap shrink-0"
-            >
-              <Eye className="w-3.5 h-3.5" />
-              <span>
-                {showIllustrativeShowcase
-                  ? isAr
-                    ? 'إخفاء بطاقات العرض التوضيحية'
-                    : 'Hide Illustrative UI Cards'
-                  : isAr
-                    ? 'إظهار بطاقات العرض التوضيحية (UI Demo)'
-                    : 'Show Illustrative UI Demo Cards'}
-              </span>
-            </button>
-          </div>
-
-          {showIllustrativeShowcase && (
-            <div className="space-y-3 pt-2 border-t border-amber-200">
-              <p className="text-xs text-stone-700">
-                {isAr
-                  ? 'يمكنك معاينة هيكل بطاقة الاستشهاد الموثقة وبطاقة الرفض المنهجي أدناه. كل بطاقة موسومة بوضوح بعبارة "Illustrative UI demo — not a live academic answer":'
-                  : 'You can inspect the citation card layout and refusal structure below. Every showcase card is explicitly labeled "Illustrative UI demo — not a live academic answer":'}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {ILLUSTRATIVE_SHOWCASE_EXAMPLES.map((ex) => (
-                  <button
-                    key={ex.id}
-                    type="button"
-                    onClick={() => loadIllustrativeExample(ex.id)}
-                    className="px-3 py-1.5 text-xs font-medium bg-white border border-stone-300 hover:border-[#0F5257] text-stone-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
-                  >
-                    {isAr ? ex.label_ar : ex.label_en}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
-      )}
-
       {/* Conversation Responses & Citations */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
@@ -295,6 +225,7 @@ export const AdvisorChatView: React.FC<AdvisorChatViewProps> = ({
             <button
               type="button"
               onClick={() => setHistory([])}
+              disabled={submitting}
               className="text-xs text-stone-600 hover:text-[#8C2D19] flex items-center gap-1"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -304,17 +235,8 @@ export const AdvisorChatView: React.FC<AdvisorChatViewProps> = ({
         </div>
 
         {history.length === 0 ? (
-          <div className="bg-white border border-stone-200 rounded-xl p-8 text-center space-y-2">
-            <p className="text-sm font-medium text-stone-800">
-              {isAr
-                ? 'لا توجد استعلامات في هذه الجلسة بعد.'
-                : 'No queries submitted in this session yet.'}
-            </p>
-            <p className="text-xs text-stone-500 max-w-xl mx-auto">
-              {isAr
-                ? 'اطرح سؤالاً أعلاه للاتصال بخادم FastAPI المحلي، أو اضغط على أحد الأمثلة التوضيحية لمعاينة تصميم بطاقات الأدلة والرفض.'
-                : 'Submit a question above to query your local FastAPI server, or load one of the labeled illustrative UI cards above.'}
-            </p>
+          <div className="bg-white border border-stone-200 rounded-xl p-8 text-center text-sm text-stone-500">
+            {isAr ? 'اكتب سؤالك واختر البرنامج للحصول على إجابة من البيانات المحملة.' : 'Enter a question and choose a program to get an answer from the loaded catalog.'}
           </div>
         ) : (
           <div className="space-y-4">
@@ -330,18 +252,6 @@ export const AdvisorChatView: React.FC<AdvisorChatViewProps> = ({
                   key={item.id}
                   className="bg-white border border-stone-200 rounded-xl p-6 space-y-4"
                 >
-                  {/* Illustrative UI Demo Mandatory Notice */}
-                  {resp.is_illustrative_demo && (
-                    <div className="p-2.5 rounded-lg bg-amber-100/90 border border-amber-300 text-amber-950 text-xs font-semibold flex items-center justify-between gap-2">
-                      <span>Illustrative UI demo — not a live academic answer</span>
-                      <span>
-                        {isAr
-                          ? 'عرض توضيحي للواجهة فقط — ليس إجابة أكاديمية حية'
-                          : 'Static UI structure preview'}
-                      </span>
-                    </div>
-                  )}
-
                   {/* User Question Header */}
                   <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-stone-200 pb-3">
                     <div className="text-sm font-semibold text-stone-900">{item.query}</div>
@@ -359,10 +269,10 @@ export const AdvisorChatView: React.FC<AdvisorChatViewProps> = ({
                         <ShieldAlert className="w-4 h-4 shrink-0" />
                         <span>
                           {resp.status === 'backend_disconnected'
-                            ? 'Local backend not connected'
+                            ? isAr ? 'الخادم المحلي غير متصل' : 'Local backend not connected'
                             : resp.status === 'ollama_unavailable'
-                              ? 'Local Ollama model unavailable'
-                              : `Structured Refusal (${resp.refusal_type || 'unverified'})`}
+                              ? isAr ? 'نموذج Ollama المحلي غير متاح' : 'Local Ollama model unavailable'
+                              : isAr ? 'تعذر تقديم إجابة موثقة' : `Structured Refusal (${resp.refusal_type || 'unverified'})`}
                         </span>
                       </div>
                       <p className="text-sm text-stone-800 whitespace-pre-line leading-relaxed">
@@ -388,31 +298,22 @@ export const AdvisorChatView: React.FC<AdvisorChatViewProps> = ({
                           <strong className="font-mono">{resp.citations.length}</strong>
                         </span>
                       </div>
-                      <div className="text-sm text-stone-900 whitespace-pre-line leading-relaxed">
+                      <div
+                        lang={resp.language || lang}
+                        dir={(resp.language || lang) === 'ar' ? 'rtl' : 'ltr'}
+                        className="text-sm text-stone-900 whitespace-pre-line leading-relaxed"
+                      >
                         {resp.answer}
                       </div>
                     </div>
                   )}
 
-                  {/* Conflict Warnings if present */}
                   {resp.conflicts && resp.conflicts.length > 0 && (
-                    <div className="p-3.5 rounded-lg bg-amber-50 border border-amber-200 space-y-1.5">
-                      <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-900">
-                        <AlertCircle className="w-4 h-4 shrink-0" />
-                        <span>
-                          {isAr
-                            ? 'تعارض مسجل في المصادر الرسمية لهذا المساق:'
-                            : 'Recorded Website Conflict on Retrieved Course:'}
-                        </span>
-                      </div>
-                      {resp.conflicts.map((c) => (
-                        <div key={c.conflict_id} className="text-xs text-stone-700">
-                          <span className="font-mono font-semibold">{c.course_number}</span> ({c.field_name}):{' '}
-                          Source A = <code className="font-mono">{c.value_source_a}</code> vs Source B ={' '}
-                          <code className="font-mono">{c.value_source_b}</code>
-                        </div>
-                      ))}
-                    </div>
+                    <p className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                      {isAr
+                        ? 'توجد تعارضات مسجلة في بيانات بعض المساقات المسترجعة. راجع المصادر الجامعية قبل الاعتماد عليها.'
+                        : 'Some retrieved courses have recorded source conflicts. Check the university sources before relying on them.'}
+                    </p>
                   )}
 
                   {/* Citations List */}

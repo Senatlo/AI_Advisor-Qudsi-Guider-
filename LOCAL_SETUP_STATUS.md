@@ -19,7 +19,7 @@ Verified on 2026-11-07 in this project folder.
 - `npm run build`: passed.
 - `npm run lint` (TypeScript check): passed.
 - Existing frontend planner tests: passed.
-- Python tests: 11 passed after semantic indexing was added. These include real local Chroma with deterministic test embeddings and do not validate every imported dataset record.
+- Python tests: 19 passed after unavailable features were retired. These include real local Chroma with deterministic test embeddings and do not validate every imported dataset record.
 - FastAPI TestClient: health, knowledge status, programs, and course search returned HTTP 200.
 - Health reports SQLite ready, dataset loaded, Ollama reachable, and both configured model tags installed.
 - BGE-M3 local inference returned one 1,024-dimensional embedding.
@@ -76,5 +76,25 @@ The complete implementation is in `backend/ingest/index_vectors.py`. It embeds o
 `SEMANTIC_MAX_DISTANCE=1.12` rejects distant neighbors using Chroma's default squared-L2 distance. This initial cutoff was checked against English/Arabic course queries and unrelated housing-fee queries, not a comprehensive relevance benchmark. Fee and regulation questions are refused while no policy chunks are loaded. These checks reduce unsupported matches; they do not establish perfect retrieval or academic correctness.
 
 The pre-refresh SQLite backup is `backend/data/alquds_catalog.before-vectors.db`. Model weights were not changed. Index counts and model identity are available from `/api/knowledge/status` and `backend/data/chroma_index/index-report.json`.
+
+## Prerequisite course-name lookup
+
+Retrieval now follows one hop of course-number references in a catalog row's original prerequisite text. It adds matching same-program course records to the evidence before lower-ranked search hits, within the citation budget. Generic catalog records are fallback only; a name from another program is not silently substituted. Missing names are explicitly marked unavailable. This does not parse AND/OR rules or establish registration eligibility.
+
+The screenshot query for `LOCAL-CMP-BSC` now retrieves `0702113`, `Programming Fundamentals for Eng.`, with the Computer Engineering catalog source. Retrieval evidence is saved in `local-prerequisite-retrieval-verification.json`. The full implementation is in `backend/rag/retriever.py`; regression checks are in `tests/python/test_vector_index.py`.
+
+The exact screenshot question, `what is the prerequiset for data structure`, passed a live frontend-to-backend-to-Qwen check in 7.5 seconds. The final answer includes both `Programming Fundamentals for Eng.` and `0702113`; its citation list includes the same-program prerequisite record. See `local-prerequisite-chat-verification.json`.
+
+An earlier live attempt produced an empty final answer despite retrieving the name. Local chat now requests `think=false` to obtain the direct final response and rejects empty response content instead of reporting it as an answered question. This follows Ollama's documented chat controls: https://github.com/ollama/ollama/blob/main/docs/capabilities/thinking.mdx. Regression tests are in `tests/python/test_ollama_responses.py`. The backend is running with these changes.
+
+## Response language follows the page
+
+The chat form sends `language: ar` or `language: en` from the page language selection. FastAPI validates and forwards it to retrieval/generation; the standalone fallback server forwards it too. The model receives an explicit response-language instruction independent of the question and history languages. Refusal and model-error messages have Arabic/English variants. Each generated answer retains its language and RTL/LTR direction; changing the page language affects new replies, not previously generated history.
+
+Verified in the real browser form against local Qwen: an English prerequisite question on the Arabic page produced an Arabic response; after switching to English, an Arabic question produced an English response even with the previous Arabic turn in history. Captured requests, responses, and rendered directions are in `local-language-browser-verification.json`. These checks passed again after feature cleanup.
+
+## Current active feature set
+
+The application now exposes overview, chat, course explorer, and sources/data status only. The incomplete study planner, disconnected portal controls, demo UI/fallback data, and static benchmark claims were removed. Planner and portal public routes now return HTTP 404. Legacy fixtures remain only in tests. Live catalog browsing includes pagination and source-backed details. See `FEATURE_CLEANUP.md` for the removal inventory and verification evidence.
 
 Live checks through the frontend proxy: Qwen 3.5 returned a sourced answer identifying course `0303201` as `Data Structures & Algorithms I`, with 4.0 credits. The initial check took 60.4 seconds; the final check took 54.6 seconds and was saved directly as UTF-8 with its request in `local-rag-chat-verification.json`. The running API also refused the unsupported housing-fees question. This verifies the tested retrieval and answer path, not every possible question or the correctness of the source curriculum.
