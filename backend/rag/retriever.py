@@ -53,6 +53,7 @@ Follow these non-negotiable rules:
 5. Note that rows labeled 'recommended' in plan_course_requirements are NOT proof that a course is mandatory, and MED rows are departmental listings rather than an official MD degree plan.
 6. If conflicting rows exist in <retrieved_evidence>, explicitly report both values and their source URLs.
 7. If the evidence is insufficient to answer the question, state clearly what is missing and refuse to guess.
+8. When explaining prerequisites or corequisites, include each referenced course's catalog name and code when supplied. Preserve the original rule's AND/OR and conditions; looking up a name does not verify eligibility. If a referenced name is unavailable, say so explicitly.
 """
 
 # These topics require university policy evidence, not course-title similarity.
@@ -325,6 +326,7 @@ class HybridRAGService:
                 passages_by_id.values(),
                 key=lambda x: (-float(x["score"]), str(x["course_number"]), str(x["chunk_id"])),
             )[:top_k]
+            ranked = self._expand_referenced_courses(cur, ranked, top_k)
 
             # Collect related conflicts and data gaps for the retrieved courses/program
             retrieved_codes = sorted({p["course_number"] for p in ranked if p.get("course_number")})
@@ -365,6 +367,66 @@ class HybridRAGService:
             }
         finally:
             conn.close()
+
+    def _expand_referenced_courses(
+        self,
+        cur: sqlite3.Cursor,
+        ranked: List[Dict[str, Any]],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """Follow one hop of catalog prerequisite references, within the same program.
+
+        Reserve citation space for name lookups before lower-ranked search hits.
+        Never interpret a list of codes as an AND/OR eligibility rule, or combine
+        different programs' versions of the same course number.
+        """
+        expanded: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for passage in ranked:
+            if len(expanded) >= limit:
+                break
+            if passage["chunk_id"] in seen:
+                continue
+            primary = dict(passage)
+            expanded.append(primary)
+            seen.add(passage["chunk_id"])
+            if passage.get("chunk_type") != "catalog_row":
+                continue
+            source = cur.execute(
+                "SELECT * FROM courses_master_official WHERE row_id = ?",
+                (passage["chunk_id"],),
+            ).fetchone()
+            if source is None:
+                continue
+            references = extract_course_numbers_from_query(source["raw_prerequisite_text"] or "")
+            for code in references:
+                if code == source["course_number"] or len(expanded) >= limit:
+                    continue
+                rows = cur.execute(
+                    """SELECT * FROM courses_master_official
+                    WHERE course_number = ? AND (program_id = ? OR program_id = '')
+                    ORDER BY CASE WHEN program_id = ? THEN 0 ELSE 1 END, row_id""",
+                    (code, source["program_id"] or "", source["program_id"] or ""),
+                ).fetchall()
+                # Prefer the program-specific record; generic records are fallback.
+                same_program = [row for row in rows if row["program_id"] == source["program_id"]]
+                rows = same_program or rows
+                if not rows:
+                    primary["text"] += f" | Referenced course {code}: catalog name unavailable in this program."
+                for row in rows:
+                    if len(expanded) >= limit:
+                        break
+                    if row["row_id"] not in seen:
+                        reference = self._row_to_passage(
+                            cur, row, score=passage["score"], match_reason="referenced_course_lookup"
+                        )
+                        reference["text"] = (
+                            f"Referenced by catalog rule for {source['course_number']} "
+                            "(course-name lookup only; preserve the original rule): " + reference["text"]
+                        )
+                        expanded.append(reference)
+                        seen.add(row["row_id"])
+        return expanded
 
     def _row_to_passage(
         self,
