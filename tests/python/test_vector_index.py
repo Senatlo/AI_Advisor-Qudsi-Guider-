@@ -12,6 +12,7 @@ import chromadb
 
 from backend.config import get_settings
 from backend.ingest.importer import DatasetIngestor
+from backend.ingest.arabic_utils import course_title_aliases
 from backend.ingest.index_vectors import load_documents, record_for, sync_records
 from backend.rag.retriever import HybridRAGService
 
@@ -82,6 +83,44 @@ class TestVectorIndex(unittest.TestCase):
         result = rag.retrieve("data structure", program_id="CS")
         self.assertTrue(all(p["chunk_id"] != "eng-only" for p in result["passages"]))
         self.assertIn("catalog name unavailable in this program", result["passages"][0]["text"])
+
+    def test_database_aliases_keep_course_and_prerequisite_in_selected_program(self):
+        self.add_catalog_reference("cs-prerequisite", "CS", "Software Engineering")
+        with sqlite3.connect(self.settings.sqlite_db_path) as conn:
+            conn.executemany("""INSERT INTO courses_master_official
+                (row_id,course_number,program_id,title_en,title_ar,credit_hours,source_url,
+                 raw_prerequisite_text,normalized_search_text)
+                VALUES (?, ?, ?, ?, ?, 3, 'https://www.alquds.edu/catalog', ?, ?)""", [
+                    ("cs-db", "0302300", "CS", "Database Systems", "نظم قواعد البيانات",
+                     "Pr-0302101", "database systems نظم قواعد البيانات"),
+                    ("cs-db-lab", "0302301", "CS", "Database Systems Lab", "",
+                     "Co-0302300", "database systems lab"),
+                    ("eng-db", "0702300", "ENG", "Database Systems", "",
+                     "", "database systems"),
+                ])
+        rag = HybridRAGService(settings=self.settings, ollama_client=TestEmbeddings())
+        for name in ["الداتا بيس", "الداتابيز", "داتا باس", "قواعد البيانات", "database", "data base"]:
+            with self.subTest(name=name):
+                result = rag.retrieve(f"المتطلب السابق لمساق {name}", program_id="CS")
+                self.assertFalse(result["refusal"])
+                ids = [p["chunk_id"] for p in result["passages"]]
+                self.assertEqual(ids[0], "cs-db")
+                self.assertIn("cs-prerequisite", ids)
+                self.assertNotIn("official-A", ids)  # Data Structures is another course.
+                self.assertNotIn("eng-db", ids)
+        lab = rag.retrieve("database lab prerequisite", program_id="CS")
+        self.assertEqual(lab["passages"][0]["chunk_id"], "cs-db-lab")
+        explicit = rag.retrieve("database 0302102", program_id="CS")
+        self.assertEqual(explicit["passages"][0]["course_number"], "0302102")
+
+    def test_data_structures_alias_does_not_match_database_or_generic_data(self):
+        self.assertEqual(course_title_aliases("data"), [])
+        aliases = course_title_aliases("هياكل البيانات")
+        self.assertIn("data structures", aliases)
+        self.assertNotIn("database", aliases)
+        rag = HybridRAGService(settings=self.settings, ollama_client=TestEmbeddings())
+        result = rag.retrieve("المتطلب السابق لمساق هياكل البيانات", program_id="CS")
+        self.assertEqual(result["passages"][0]["chunk_id"], "official-A")
 
     def test_repeated_build_skips_unchanged_and_updates_changed_rows(self):
         records = [record_for(doc, "model-digest") for doc in load_documents(self.settings)]

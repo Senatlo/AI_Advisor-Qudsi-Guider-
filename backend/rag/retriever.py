@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.config import Settings, get_settings
 from backend.ingest.arabic_utils import (
+    course_title_aliases,
     extract_course_numbers_from_query,
     normalize_arabic_for_search,
 )
@@ -54,6 +55,7 @@ Follow these non-negotiable rules:
 6. If conflicting rows exist in <retrieved_evidence>, explicitly report both values and their source URLs.
 7. If the evidence is insufficient to answer the question, state clearly what is missing and refuse to guess.
 8. When explaining prerequisites or corequisites, include each referenced course's catalog name and code when supplied. Preserve the original rule's AND/OR and conditions; looking up a name does not verify eligibility. If a referenced name is unavailable, say so explicitly.
+9. The latest Student Question determines the requested course. Previous assistant replies are not evidence: never carry their course names, codes, or conclusions into a new explicitly named course question. Distinguish databases from data structures. A retrieved prerequisite's own prerequisite is not automatically a prerequisite of the requested course.
 """
 
 # These topics require university policy evidence, not course-title similarity.
@@ -248,6 +250,8 @@ class HybridRAGService:
             passages_by_id: Dict[str, Dict[str, Any]] = {}
             course_codes = extract_course_numbers_from_query(clean_query)
             norm_q = normalize_arabic_for_search(clean_query)
+            title_aliases = [] if course_codes else course_title_aliases(clean_query)
+            title_match_ids: set[str] = set()
             query_tokens = [
                 t for t in norm_q.split() if len(t) >= 2 and t not in {"من", "في", "ما", "هو", "هي", "عن", "what", "is", "the", "for", "of", "in"}
             ]
@@ -275,7 +279,7 @@ class HybridRAGService:
                     params.append(program_id)
 
                 candidate_rows = cur.execute(
-                    f"SELECT * FROM courses_master_official {sql_where} LIMIT 500",
+                    f"SELECT * FROM courses_master_official {sql_where}",
                     params,
                 ).fetchall()
                 for r in candidate_rows:
@@ -284,12 +288,28 @@ class HybridRAGService:
                         continue
                     haystack = r["normalized_search_text"] or ""
                     matched = sum(1 for tok in query_tokens if tok in haystack)
-                    if matched > 0:
+                    title = normalize_arabic_for_search(
+                        f"{r['title_en'] or ''} {r['title_ar'] or ''}"
+                    )
+                    title_match = any(re.search(r"(?<!\w)" + re.escape(alias) + r"(?!\w)", title)
+                                      for alias in title_aliases)
+                    if title_match:
+                        title_match_ids.add(cid)
+                    if matched > 0 or title_match:
                         score = (matched / len(query_tokens)) * 60.0
+                        if title_match:
+                            score += 100.0
+                            # A generic course question defaults to the lecture;
+                            # retain labs, but rank them after the main course.
+                            wants_lab = bool(re.search(r"\blab(?:oratory)?\b|مختبر|عملي", norm_q))
+                            is_lab = bool(re.search(r"\blab(?:oratory)?\b|مختبر|عملي", title))
+                            if wants_lab == is_lab:
+                                score += 20.0
                         if program_id and r["program_id"] == program_id:
                             score += 15.0
                         passages_by_id[cid] = self._row_to_passage(
-                            cur, r, score=score, match_reason="lexical_match"
+                            cur, r, score=score,
+                            match_reason="course_title_alias" if title_match else "lexical_match"
                         )
 
                 # Check verified policy_chunks table as well
@@ -321,6 +341,13 @@ class HybridRAGService:
 
             # Step C: ChromaDB semantic recall if embeddings & collection are populated
             self._merge_chroma_results(clean_query, program_id, passages_by_id)
+
+            # Explicit course-title matches anchor the question. Do not pad its
+            # context with unrelated semantic neighbors or generic word matches.
+            # Exact codes retain priority and prerequisite names are added below.
+            if title_match_ids and not course_codes:
+                passages_by_id = {cid: p for cid, p in passages_by_id.items()
+                                  if cid in title_match_ids}
 
             ranked = sorted(
                 passages_by_id.values(),
@@ -618,19 +645,29 @@ class HybridRAGService:
             "Keep citation IDs, course codes, and source URLs unchanged."
         )
         messages: List[Dict[str, str]] = [{"role": "system", "content": GROUNDED_SYSTEM_PROMPT + "\n" + language_instruction}]
-        if session_history:
+        explicit_course = bool(course_title_aliases(query) or extract_course_numbers_from_query(query))
+        if session_history and not explicit_course:
             # Limit conversation context strictly to the current user/session (last 4 turns)
             for turn in session_history[-4:]:
                 role = turn.get("role", "user")
                 if role in {"user", "assistant"} and turn.get("content"):
                     messages.append({"role": role, "content": str(turn["content"])[:1000]})
 
+        resolved_courses = [p for p in passages if "course_title_alias" in p.get("match_reason", "")]
+        resolution = ""
+        if resolved_courses:
+            resolution = (
+                "\nThe latest question's course-name search alias matches these catalog titles "
+                "(do not substitute a course from earlier conversation): "
+                + "; ".join(f"{p['title_en'] or p['title_ar']} ({p['course_number']})"
+                            for p in resolved_courses)
+            )
         messages.append(
             {
                 "role": "user",
                 "content": (
                     f"{evidence_str}\n\n"
-                    f"Student Question: {query}\n"
+                    f"Student Question: {query}{resolution}\n"
                     f"Provide a concise response in {'Arabic' if language == 'ar' else 'English'}, citing [ChunkID / CourseNumber / SourceURL]."
                 ),
             }

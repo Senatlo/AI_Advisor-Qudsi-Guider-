@@ -51,6 +51,30 @@ def normalize_arabic_for_search(text: Optional[str]) -> str:
     return cleaned
 
 
+def course_title_aliases(query: str) -> list[str]:
+    """Resolve explicit bilingual course phrases, never generic 'data' tokens.
+
+    These are search aliases only, not invented official catalog translations.
+    Keep separate concepts so database questions cannot turn into data structures.
+    """
+    normalized = normalize_arabic_for_search(query)
+    groups = (
+        (
+            r"(?<!\w)(?:ال)?داتا\s*(?:بيس|بيز|باس)(?!\w)|"
+            r"(?<!\w)(?:قواعد\s+(?:ال)?بيانات|databases?|data\s+bases?)(?!\w)",
+            ("database", "databases", "data base", "قواعد البيانات", "قواعد بيانات"),
+        ),
+        (
+            r"(?<!\w)(?:data\s+structures?|(?:هياكل|تراكيب)\s+(?:ال)?بيانات|"
+            r"(?:ال)?داتا\s*ستركتشر(?:ز)?)(?!\w)",
+            ("data structures", "data structure", "هياكل البيانات", "تراكيب البيانات"),
+        ),
+    )
+    return [normalize_arabic_for_search(alias)
+            for pattern, aliases in groups if re.search(pattern, normalized)
+            for alias in aliases]
+
+
 def preserve_course_number(raw_code: object) -> str:
     """Preserve leading zeros on 7-digit Al-Quds course numbers as strings.
 

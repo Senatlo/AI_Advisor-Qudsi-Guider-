@@ -41,6 +41,21 @@ class TestChatLanguage(unittest.TestCase):
                 self.assertIn(f"response in {label}", messages[-1]["content"])
                 self.assertEqual(response["language"], language)
 
+    def test_explicit_course_question_does_not_reuse_previous_course_history(self):
+        rag = HybridRAGService()
+        retrieval = {"refusal": False, "passages": [], "conflicts": [], "gaps": []}
+        with patch.object(rag, "retrieve", return_value=retrieval), patch.object(
+            rag.ollama, "generate_chat", return_value={"content": "Answer", "model_used": "test"}
+        ) as generate:
+            history = [{"role": "assistant", "content": "STALE Data Structures 0302102"}]
+            for query in ["المتطلب السابق لمساق الداتا بيس", "database prerequisite", "course 0702324"]:
+                rag.answer_question(query, language="ar", session_history=history)
+                messages = generate.call_args.kwargs["messages"]
+                self.assertEqual(len(messages), 2)
+                self.assertNotIn("STALE", str(messages))
+            rag.answer_question("What about its credits?", session_history=history)
+            self.assertEqual(len(generate.call_args.kwargs["messages"]), 3)
+
     def test_refusals_and_model_errors_have_arabic_messages(self):
         rag = HybridRAGService()
         refusal = {"refusal": True, "refusal_type": "insufficient_evidence", "refusal_message_en": "No policy"}
