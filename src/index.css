@@ -1,0 +1,28 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --font-sans-ar: 'IBM Plex Sans Arabic', 'Plus Jakarta Sans', sans-serif;
+    --font-sans-en: 'Plus Jakarta Sans', 'IBM Plex Sans Arabic', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  html[dir="rtl"] body {
+    font-family: var(--font-sans-ar);
+  }
+
+  html[dir="ltr"] body {
+    font-family: var(--font-sans-en);
+  }
+
+  code, pre, .font-mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+

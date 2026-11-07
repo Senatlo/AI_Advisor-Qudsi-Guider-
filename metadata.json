@@ -1,0 +1,6 @@
+{
+  "name": "Al-Quds AI Academic Advisor",
+  "description": "Independent local RAG academic advisor, catalog explorer, and deterministic study planner for Al-Quds University.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

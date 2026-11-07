@@ -1,0 +1,21 @@
+node_modules/
+.venv/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Local data and generated runtime state
+backend/data/
+*.db
+*.sqlite
+*.sqlite3
+*.zip
+.local-runtime.json
+.aistudio/
+__pycache__/
+*.py[cod]
+local-*-verification.json
