@@ -1,6 +1,7 @@
 """Vector indexing regressions using real local Chroma and deterministic test embeddings."""
 
 import json
+import sqlite3
 import tempfile
 import unittest
 import zipfile
@@ -52,6 +53,35 @@ class TestVectorIndex(unittest.TestCase):
         self.assertTrue(all(d["source_url"].startswith("https://www.alquds.edu/") for d in documents))
         self.assertIn("0302101", documents[0]["text"])
         self.assertNotIn("FAKE_", json.dumps(documents))
+
+    def add_catalog_reference(self, row_id, program, title, raw_rule=""):
+        with sqlite3.connect(self.settings.sqlite_db_path) as conn:
+            conn.execute("""INSERT INTO courses_master_official
+                (row_id,course_number,program_id,title_en,credit_hours,source_url,
+                 raw_prerequisite_text,normalized_search_text)
+                VALUES (?, '0302101', ?, ?, 3, 'https://www.alquds.edu/prerequisite', ?, ?)""",
+                (row_id, program, title, raw_rule, title.lower()))
+
+    def test_prerequisite_lookup_adds_name_and_citation_within_budget(self):
+        self.add_catalog_reference("cs-prerequisite", "CS", "Programming Fundamentals", "0302102")
+        self.add_catalog_reference("eng-prerequisite", "ENG", "Different Program Title")
+        rag = HybridRAGService(settings=self.settings, ollama_client=TestEmbeddings())
+        result = rag.retrieve("what is the prerequisite for data structure", program_id="CS", top_k=2)
+        self.assertFalse(result["refusal"])
+        self.assertEqual([p["chunk_id"] for p in result["passages"]], ["official-A", "cs-prerequisite"])
+        reference = result["passages"][1]
+        self.assertEqual(reference["title_en"], "Programming Fundamentals")
+        self.assertEqual(reference["match_reason"], "referenced_course_lookup")
+        self.assertEqual(reference["source_url"], "https://www.alquds.edu/prerequisite")
+        # The prerequisite points back to the target; lookup must remain one hop.
+        self.assertEqual(len(result["passages"]), 2)
+
+    def test_prerequisite_name_does_not_come_from_another_program(self):
+        self.add_catalog_reference("eng-only", "ENG", "Wrong Program Name")
+        rag = HybridRAGService(settings=self.settings, ollama_client=TestEmbeddings())
+        result = rag.retrieve("data structure", program_id="CS")
+        self.assertTrue(all(p["chunk_id"] != "eng-only" for p in result["passages"]))
+        self.assertIn("catalog name unavailable in this program", result["passages"][0]["text"])
 
     def test_repeated_build_skips_unchanged_and_updates_changed_rows(self):
         records = [record_for(doc, "model-digest") for doc in load_documents(self.settings)]
